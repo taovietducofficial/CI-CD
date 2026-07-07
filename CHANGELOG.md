@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/taovietducofficial/CI-CD/compare/v1.0.2...v1.1.0) (2026-07-07)
+
+
+### Features
+
+* **release:** publish versioned image from release workflow (no PAT needed) ([6852023](https://github.com/taovietducofficial/CI-CD/commit/685202344cf26336ac7e3ad706be1f3e204cde7d))
+
 ## [1.0.2](https://github.com/taovietducofficial/CI-CD/compare/v1.0.1...v1.0.2) (2026-07-07)
 
 
