@@ -17,7 +17,6 @@ permissions:
   contents: read
 
 jobs:
-  # Re-run the quality gate: never ship an image if tests are red.
   ci:
     uses: ./.github/workflows/reusable-node-ci.yml
 
@@ -27,8 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write # push to GHCR
-      id-token: write # cosign keyless (OIDC)
+      packages: write
+      id-token: write
     outputs:
       image: ${{ steps.image.outputs.ref }}
     steps:
@@ -64,18 +63,13 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          sbom: true # supply-chain: attach SBOM attestation
-          provenance: mode=max # supply-chain: SLSA provenance
+          sbom: true
+          provenance: mode=max
 
-      # github.repository may contain uppercase; OCI refs must be lowercase.
       - name: Compute image ref (lowercase + digest)
         id: image
         run: echo "ref=${REGISTRY}/${IMAGE_NAME,,}@${{ steps.build.outputs.digest }}" >>"$GITHUB_OUTPUT"
 
-      # Advisory base-OS scan: prints HIGH/CRITICAL findings to the log but never
-      # blocks the release. Base images routinely carry advisories with no
-      # same-day app-side fix; Dependabot's `docker` updates keep the base patched.
-      # CVEs we DO control (app + deps) are hard-gated in ci.yml's `trivy-fs` job.
       - name: Scan image for CVEs (advisory)
         uses: aquasecurity/trivy-action@v0.36.0
         continue-on-error: true
@@ -94,29 +88,20 @@ jobs:
     name: Deploy to staging
     needs: build-push
     runs-on: ubuntu-latest
-    environment: staging # auto-deploy; no approval required
+    environment: staging
     steps:
       - name: Deploy
         env:
           IMAGE: ${{ needs.build-push.outputs.image }}
-        run: |
-          echo "Deploying $IMAGE to staging"
-          # ponytail: placeholder. Thay bằng lệnh deploy thật (cần secret/kubeconfig của bạn), ví dụ:
-          #   kubectl set image deployment/app app="$IMAGE" -n staging
-          #   helm upgrade app ./chart --set image="$IMAGE"
-          #   ssh user@host "docker pull $IMAGE && docker compose up -d"
+        run: echo "Deploying $IMAGE to staging"
 
   deploy-production:
     name: Deploy to production
     needs: [build-push, deploy-staging]
     runs-on: ubuntu-latest
-    # Approval gate: bật "Required reviewers" cho environment `production`
-    # trong Settings → Environments để pipeline dừng chờ duyệt trước khi chạy.
     environment: production
     steps:
       - name: Deploy
         env:
           IMAGE: ${{ needs.build-push.outputs.image }}
-        run: |
-          echo "Deploying $IMAGE to production"
-          # ponytail: placeholder — dùng cùng kiểu lệnh như deploy-staging, trỏ tới cluster/host prod.
+        run: echo "Deploying $IMAGE to production"

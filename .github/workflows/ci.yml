@@ -13,11 +13,9 @@ permissions:
   contents: read
 
 jobs:
-  # Quality gate (lint/typecheck/test) via the reusable workflow.
   ci:
     uses: ./.github/workflows/reusable-node-ci.yml
 
-  # SAST — static analysis of source.
   codeql:
     name: CodeQL
     runs-on: ubuntu-latest
@@ -31,7 +29,6 @@ jobs:
           languages: javascript-typescript
       - uses: github/codeql-action/analyze@v3
 
-  # Flags risky dependency changes on PRs (license + known vulns).
   dependency-review:
     name: Dependency Review
     if: github.event_name == 'pull_request'
@@ -45,7 +42,6 @@ jobs:
         with:
           fail-on-severity: high
 
-  # Scan repo + dependencies for known CVEs.
   trivy-fs:
     name: Trivy FS Scan
     runs-on: ubuntu-latest

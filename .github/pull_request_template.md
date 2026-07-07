@@ -1,7 +1,5 @@
 ## What & why
 
-<!-- Mô tả ngắn gọn thay đổi và lý do. Link issue nếu có (Closes #123). -->
-
 ## Changes
 
 -

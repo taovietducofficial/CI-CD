@@ -6,7 +6,6 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'lcov'],
       include: ['src/**/*.ts'],
-      // ponytail: server.ts chỉ bind port/listen — không test được bằng inject, loại khỏi coverage.
       exclude: ['src/**/*.test.ts', 'src/server.ts'],
       thresholds: {
         lines: 80,

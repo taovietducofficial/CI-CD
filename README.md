@@ -1,4 +1,4 @@
-# CI/CD Template — Node.js/TypeScript → Docker (GitHub Actions)
+# CI/CD Template — Node.js/TypeScript -> Docker (GitHub Actions)
 
 Template CI/CD chuẩn production để copy sang dự án Node.js khác. App mẫu là một Fastify
 service tối giản; điều đáng giá là **pipeline** xung quanh nó.
@@ -15,7 +15,7 @@ service tối giản; điều đáng giá là **pipeline** xung quanh nó.
 | Image scan          | Trivy (image)                                                                     |
 | Supply-chain        | SBOM + SLSA provenance (buildx) + chữ ký **cosign keyless**                       |
 | Registry            | GHCR (`ghcr.io`) qua `GITHUB_TOKEN`                                               |
-| Deploy              | staging (auto) → production (approval gate) qua GitHub Environments               |
+| Deploy              | staging (auto) -> production (approval gate) qua GitHub Environments              |
 | Bảo trì             | Dependabot (npm + actions + docker), CODEOWNERS, PR template                      |
 
 ## Chạy local
@@ -39,15 +39,15 @@ curl localhost:3000/health
 
 - **`ci.yml`** — chạy trên PR & push nhánh non-main: quality gate + CodeQL + dependency
   review + Trivy fs scan.
-- **`cd.yml`** — chạy trên push `main` và tag `v*`: quality gate → build image (buildx,
-  cache, SBOM, provenance) → push GHCR → Trivy image scan (advisory, không block) → cosign
-  sign → deploy staging (auto) → deploy production (chờ approval).
+- **`cd.yml`** — chạy trên push `main` và tag `v*`: quality gate -> build image (buildx,
+  cache, SBOM, provenance) -> push GHCR -> Trivy image scan (advisory, không block) -> cosign
+  sign -> deploy staging (auto) -> deploy production (chờ approval).
 - **`reusable-node-ci.yml`** — quality gate dùng chung (`workflow_call`). Repo khác có thể
   tái dùng: `uses: <owner>/ci-cd/.github/workflows/reusable-node-ci.yml@main`.
 
 ## Thiết lập trên GitHub (bắt buộc cho phần deploy)
 
-1. **Environments** — Settings → Environments, tạo `staging` và `production`.
+1. **Environments** — Settings -> Environments, tạo `staging` và `production`.
 2. **Approval gate** — ở environment `production`, bật **Required reviewers** để pipeline
    dừng chờ duyệt trước khi deploy prod.
 3. **GHCR** — không cần secret; `GITHUB_TOKEN` đã đủ quyền push (đã khai báo
@@ -69,8 +69,8 @@ cosign verify \
 
 Repo này được thiết kế để tái dùng. Cách nhanh nhất là dùng nó như **template repository**:
 
-1. **Settings → General → tick ☑ Template repository** (làm 1 lần).
-2. Project mới: bấm **"Use this template" → Create a new repository** → GitHub copy toàn bộ
+1. **Settings -> General -> bật Template repository** (làm 1 lần).
+2. Project mới: bấm **"Use this template" -> Create a new repository** -> GitHub copy toàn bộ
    (`.github/`, `Dockerfile`, config, app mẫu) sang repo mới.
 
 > Không có nút "Use this template"? Cứ copy tay 3 phần: thư mục **`.github/`**, **`Dockerfile`**,
@@ -79,7 +79,7 @@ Repo này được thiết kế để tái dùng. Cách nhanh nhất là dùng n
 ### 2 điều kiện bắt buộc (không tự đi theo folder)
 
 - **`package.json` phải có đủ script** workflow gọi: `lint`, `format:check`, `typecheck`,
-  `test`, `build`. Thiếu bất kỳ cái nào → CI đỏ. (Stack khác Node.js thì phải viết lại phần
+  `test`, `build`. Thiếu bất kỳ cái nào -> CI đỏ. (Stack khác Node.js thì phải viết lại phần
   build/test trong `reusable-node-ci.yml` + `Dockerfile`.)
 - **Tạo lại GitHub Environments** `staging` + `production` (và Required reviewers cho
   `production`) trong repo mới — đây là **cấu hình trên GitHub, không nằm trong code**. Xem
