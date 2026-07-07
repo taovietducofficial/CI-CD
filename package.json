@@ -1,6 +1,6 @@
 {
   "name": "ci-cd",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Production CI/CD template: Node.js/TypeScript + GitHub Actions + Docker",
   "type": "module",
   "license": "MIT",
