@@ -3,23 +3,30 @@ name: Reusable Node CI
 on:
   workflow_call:
     inputs:
-      node-version:
-        description: Node.js version to use
+      node-versions:
+        description: JSON array of Node.js versions to test against
         type: string
-        default: '22'
+        default: '["22", "24"]'
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   quality:
+    name: Node ${{ matrix.node }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ${{ fromJSON(inputs.node-versions) }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ inputs.node-version }}
+          node-version: ${{ matrix.node }}
           cache: npm
 
       - run: npm ci
@@ -32,6 +39,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage
+          name: coverage-node-${{ matrix.node }}
           path: coverage/
           if-no-files-found: ignore
+
+      - name: Report coverage on PR
+        if: matrix.node == '22' && github.event_name == 'pull_request'
+        uses: davelosert/vitest-coverage-report-action@v2

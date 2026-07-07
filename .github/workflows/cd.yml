@@ -4,9 +4,10 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+  workflow_dispatch:
 
 concurrency:
-  group: cd-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -17,21 +18,26 @@ permissions:
   contents: read
 
 jobs:
-  ci:
+  quality:
+    name: Quality gate
     uses: ./.github/workflows/reusable-node-ci.yml
 
   build-push:
-    name: Build, Scan, Sign & Push
-    needs: ci
+    name: Build, scan, sign & push
+    needs: quality
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
       id-token: write
+      attestations: write
     outputs:
       image: ${{ steps.image.outputs.ref }}
     steps:
       - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
 
       - uses: docker/setup-buildx-action@v3
 
@@ -58,6 +64,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -66,9 +73,18 @@ jobs:
           sbom: true
           provenance: mode=max
 
-      - name: Compute image ref (lowercase + digest)
+      - name: Compute image refs (lowercase)
         id: image
-        run: echo "ref=${REGISTRY}/${IMAGE_NAME,,}@${{ steps.build.outputs.digest }}" >>"$GITHUB_OUTPUT"
+        run: |
+          echo "name=${REGISTRY}/${IMAGE_NAME,,}" >>"$GITHUB_OUTPUT"
+          echo "ref=${REGISTRY}/${IMAGE_NAME,,}@${{ steps.build.outputs.digest }}" >>"$GITHUB_OUTPUT"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
 
       - name: Scan image for CVEs (advisory)
         uses: aquasecurity/trivy-action@v0.36.0
@@ -88,8 +104,31 @@ jobs:
     name: Deploy to staging
     needs: build-push
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: staging
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
     steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Verify signature before deploy
+        env:
+          IMAGE: ${{ needs.build-push.outputs.image }}
+        run: |
+          cosign verify \
+            --certificate-identity-regexp "^${{ github.server_url }}/${{ github.repository }}/.github/workflows/cd.yml@.*$" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE"
+
       - name: Deploy
         env:
           IMAGE: ${{ needs.build-push.outputs.image }}
@@ -99,8 +138,31 @@ jobs:
     name: Deploy to production
     needs: [build-push, deploy-staging]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: production
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
     steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Verify signature before deploy
+        env:
+          IMAGE: ${{ needs.build-push.outputs.image }}
+        run: |
+          cosign verify \
+            --certificate-identity-regexp "^${{ github.server_url }}/${{ github.repository }}/.github/workflows/cd.yml@.*$" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE"
+
       - name: Deploy
         env:
           IMAGE: ${{ needs.build-push.outputs.image }}

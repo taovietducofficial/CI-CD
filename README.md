@@ -8,15 +8,17 @@ service tối giản; điều đáng giá là **pipeline** xung quanh nó.
 | Thành phần          | Công cụ                                                                           |
 | ------------------- | --------------------------------------------------------------------------------- |
 | App                 | TypeScript + Fastify (`/health`, `/ready`)                                        |
-| Quality             | ESLint (flat config), Prettier, `tsc --noEmit`, Vitest + coverage (threshold 80%) |
+| Quality             | ESLint, Prettier, `tsc --noEmit`, Vitest + coverage (80%), test matrix Node 22/24 |
 | SAST                | GitHub CodeQL                                                                     |
 | Dependency/CVE scan | Trivy (fs) + `dependency-review-action`                                           |
-| Container           | Dockerfile multi-stage, non-root, `HEALTHCHECK`                                   |
-| Image scan          | Trivy (image)                                                                     |
-| Supply-chain        | SBOM + SLSA provenance (buildx) + chữ ký **cosign keyless**                       |
+| Container           | Dockerfile multi-stage, non-root, `HEALTHCHECK`, build **multi-arch** amd64+arm64 |
+| Image scan          | Trivy (image, advisory)                                                           |
+| Supply-chain        | SBOM + SLSA provenance + **GitHub attestation** + **cosign** sign & verify        |
 | Registry            | GHCR (`ghcr.io`) qua `GITHUB_TOKEN`                                               |
-| Deploy              | staging (auto) -> production (approval gate) qua GitHub Environments              |
-| Bảo trì             | Dependabot (npm + actions + docker), CODEOWNERS, PR template                      |
+| Release             | **release-please** — tự version + CHANGELOG + GitHub Release + tag semver         |
+| Deploy              | staging (auto) -> production (approval gate), verify chữ ký trước khi deploy      |
+| Governance          | Ruleset bảo vệ `main` (PR + CI xanh + CODEOWNERS)                                 |
+| Bảo trì             | Dependabot (npm + actions + docker), CODEOWNERS, PR title lint                    |
 
 ## Chạy local
 
@@ -37,24 +39,33 @@ curl localhost:3000/health
 
 ## Pipeline
 
-- **`ci.yml`** — chạy trên PR & push nhánh non-main: quality gate + CodeQL + dependency
-  review + Trivy fs scan.
-- **`cd.yml`** — chạy trên push `main` và tag `v*`: quality gate -> build image (buildx,
-  cache, SBOM, provenance) -> push GHCR -> Trivy image scan (advisory, không block) -> cosign
-  sign -> deploy staging (auto) -> deploy production (chờ approval).
-- **`reusable-node-ci.yml`** — quality gate dùng chung (`workflow_call`). Repo khác có thể
-  tái dùng: `uses: <owner>/ci-cd/.github/workflows/reusable-node-ci.yml@main`.
+- **`ci.yml`** — trên PR & push nhánh non-main: quality gate (matrix Node 22/24) + lint tiêu
+  đề PR + CodeQL + dependency review + Trivy fs scan + comment coverage lên PR.
+- **`cd.yml`** — trên push `main` và tag `v*`: quality gate -> build **multi-arch** (amd64 +
+  arm64, buildx cache, SBOM, provenance) -> push GHCR -> GitHub attestation -> Trivy image scan
+  (advisory) -> cosign sign -> **verify chữ ký** -> deploy staging (auto) -> deploy production
+  (chờ approval).
+- **`release.yml`** — release-please: gộp các commit `feat:`/`fix:` thành một Release PR; merge
+  PR đó thì tự tạo tag `vX.Y.Z` + CHANGELOG + GitHub Release, và tag đó kích hoạt `cd.yml` build
+  image gắn version semver.
+- **`reusable-node-ci.yml`** — quality gate dùng chung (`workflow_call`).
 
 ## Thiết lập trên GitHub (bắt buộc cho phần deploy)
 
 1. **Environments** — Settings -> Environments, tạo `staging` và `production`.
-2. **Approval gate** — ở environment `production`, bật **Required reviewers** để pipeline
-   dừng chờ duyệt trước khi deploy prod.
-3. **GHCR** — không cần secret; `GITHUB_TOKEN` đã đủ quyền push (đã khai báo
-   `packages: write`). Package tạo lần đầu ở chế độ private — chỉnh visibility nếu cần.
-4. **Deploy thật** — thay bước placeholder trong `cd.yml` (đánh dấu `ponytail:`) bằng lệnh
-   thật (`kubectl` / `helm` / `ssh`) và thêm secret tương ứng (vd `KUBE_CONFIG`) vào từng
-   environment.
+2. **Approval gate** — ở environment `production`, bật **Required reviewers**.
+3. **GHCR** — không cần secret; `GITHUB_TOKEN` đã đủ quyền push. Package lần đầu ở chế độ
+   private — chỉnh visibility nếu cần.
+4. **Branch protection** — Settings -> Rules -> Rulesets -> **New ruleset -> Import** ->
+   chọn `.github/rulesets/main-branch-protection.json`. Nó chặn push thẳng `main`, bắt buộc
+   PR + CI xanh + linear history mới được merge. Mặc định `required_approving_review_count: 0`
+   để chạy được **solo**; team thì tăng lên `1` và bật `require_code_owner_review`. Sau khi mở
+   PR đầu tiên, đối chiếu tên status check thật (tab Checks) với ruleset và sửa nếu lệch.
+5. **Release tự động** — bật **Settings -> General -> Pull Requests -> Allow squash merging**
+   và đặt commit message của squash theo tiêu đề PR. release-please đọc các commit theo chuẩn
+   Conventional Commits (`feat:`, `fix:`...) để quyết định version.
+6. **Deploy thật** — thay bước `echo` placeholder trong `cd.yml` bằng lệnh thật (`kubectl` /
+   `helm` / `ssh`) và thêm secret (vd `KUBE_CONFIG`) vào từng environment.
 
 ## Verify chữ ký image
 
@@ -104,3 +115,9 @@ jobs:
 ```
 
 (Nhưng `ci.yml` / `cd.yml` vẫn phải nằm ở mỗi repo.)
+
+## Thêm
+
+- Quy trình đóng góp & chuẩn commit: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Chính sách bảo mật & supply-chain: [SECURITY.md](SECURITY.md)
+- Giấy phép: [MIT](LICENSE)

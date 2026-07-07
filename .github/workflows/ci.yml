@@ -6,19 +6,48 @@ on:
     branches-ignore: [main]
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  ci:
+  quality:
+    name: Quality gate
+    permissions:
+      contents: read
+      pull-requests: write
     uses: ./.github/workflows/reusable-node-ci.yml
+
+  pr-title:
+    name: Lint PR title
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            perf
+            refactor
+            test
+            build
+            ci
+            chore
+            revert
 
   codeql:
     name: CodeQL
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       security-events: write
@@ -30,9 +59,10 @@ jobs:
       - uses: github/codeql-action/analyze@v3
 
   dependency-review:
-    name: Dependency Review
+    name: Dependency review
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: write
@@ -43,8 +73,9 @@ jobs:
           fail-on-severity: high
 
   trivy-fs:
-    name: Trivy FS Scan
+    name: Trivy filesystem scan
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       security-events: write
