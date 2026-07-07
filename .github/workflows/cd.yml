@@ -30,7 +30,7 @@ jobs:
       packages: write # push to GHCR
       id-token: write # cosign keyless (OIDC)
     outputs:
-      digest: ${{ steps.build.outputs.digest }}
+      image: ${{ steps.image.outputs.ref }}
     steps:
       - uses: actions/checkout@v4
 
@@ -67,6 +67,11 @@ jobs:
           sbom: true # supply-chain: attach SBOM attestation
           provenance: mode=max # supply-chain: SLSA provenance
 
+      # github.repository may contain uppercase; OCI refs must be lowercase.
+      - name: Compute image ref (lowercase + digest)
+        id: image
+        run: echo "ref=${REGISTRY}/${IMAGE_NAME,,}@${{ steps.build.outputs.digest }}" >>"$GITHUB_OUTPUT"
+
       # Advisory base-OS scan: prints HIGH/CRITICAL findings to the log but never
       # blocks the release. Base images routinely carry advisories with no
       # same-day app-side fix; Dependabot's `docker` updates keep the base patched.
@@ -75,7 +80,7 @@ jobs:
         uses: aquasecurity/trivy-action@v0.36.0
         continue-on-error: true
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          image-ref: ${{ steps.image.outputs.ref }}
           severity: HIGH,CRITICAL
           ignore-unfixed: true
 
@@ -83,7 +88,7 @@ jobs:
         uses: sigstore/cosign-installer@v3
 
       - name: Sign image (keyless, by digest)
-        run: cosign sign --yes ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+        run: cosign sign --yes ${{ steps.image.outputs.ref }}
 
   deploy-staging:
     name: Deploy to staging
@@ -93,12 +98,12 @@ jobs:
     steps:
       - name: Deploy
         env:
-          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-push.outputs.digest }}
+          IMAGE: ${{ needs.build-push.outputs.image }}
         run: |
           echo "Deploying $IMAGE to staging"
           # ponytail: placeholder. Thay bằng lệnh deploy thật (cần secret/kubeconfig của bạn), ví dụ:
           #   kubectl set image deployment/app app="$IMAGE" -n staging
-          #   helm upgrade app ./chart --set image.digest="${{ needs.build-push.outputs.digest }}"
+          #   helm upgrade app ./chart --set image="$IMAGE"
           #   ssh user@host "docker pull $IMAGE && docker compose up -d"
 
   deploy-production:
@@ -111,7 +116,7 @@ jobs:
     steps:
       - name: Deploy
         env:
-          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-push.outputs.digest }}
+          IMAGE: ${{ needs.build-push.outputs.image }}
         run: |
           echo "Deploying $IMAGE to production"
           # ponytail: placeholder — dùng cùng kiểu lệnh như deploy-staging, trỏ tới cluster/host prod.
