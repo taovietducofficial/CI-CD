@@ -1,5 +1,3 @@
-# Reusable CI: lint, format, typecheck, test+coverage.
-# Called by ci.yml and cd.yml, and by other repos via `uses:`.
 name: Reusable Node CI
 
 on:

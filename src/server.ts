@@ -5,7 +5,6 @@ const host = process.env.HOST ?? '0.0.0.0';
 
 const app = buildApp();
 
-// Graceful shutdown so Kubernetes/Docker SIGTERM drains in-flight requests.
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
     app.log.info(`Received ${signal}, shutting down`);
