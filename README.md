@@ -40,8 +40,8 @@ curl localhost:3000/health
 - **`ci.yml`** — chạy trên PR & push nhánh non-main: quality gate + CodeQL + dependency
   review + Trivy fs scan.
 - **`cd.yml`** — chạy trên push `main` và tag `v*`: quality gate → build image (buildx,
-  cache, SBOM, provenance) → Trivy image scan → cosign sign → deploy staging → deploy
-  production.
+  cache, SBOM, provenance) → push GHCR → Trivy image scan (advisory, không block) → cosign
+  sign → deploy staging (auto) → deploy production (chờ approval).
 - **`reusable-node-ci.yml`** — quality gate dùng chung (`workflow_call`). Repo khác có thể
   tái dùng: `uses: <owner>/ci-cd/.github/workflows/reusable-node-ci.yml@main`.
 
@@ -65,8 +65,42 @@ cosign verify \
   ghcr.io/<owner>/ci-cd@<digest>
 ```
 
-## Tái dùng cho dự án khác
+## Dùng cho project mới
 
-Thay thư mục `src/` bằng app thật của bạn, đổi `IMAGE_NAME` nếu muốn tên image khác (mặc
-định lấy theo `github.repository`), giữ nguyên phần workflow. Các bước quality/security
-chạy y hệt.
+Repo này được thiết kế để tái dùng. Cách nhanh nhất là dùng nó như **template repository**:
+
+1. **Settings → General → tick ☑ Template repository** (làm 1 lần).
+2. Project mới: bấm **"Use this template" → Create a new repository** → GitHub copy toàn bộ
+   (`.github/`, `Dockerfile`, config, app mẫu) sang repo mới.
+
+> Không có nút "Use this template"? Cứ copy tay 3 phần: thư mục **`.github/`**, **`Dockerfile`**,
+> và các **npm script** mà workflow gọi (xem bên dưới).
+
+### 2 điều kiện bắt buộc (không tự đi theo folder)
+
+- **`package.json` phải có đủ script** workflow gọi: `lint`, `format:check`, `typecheck`,
+  `test`, `build`. Thiếu bất kỳ cái nào → CI đỏ. (Stack khác Node.js thì phải viết lại phần
+  build/test trong `reusable-node-ci.yml` + `Dockerfile`.)
+- **Tạo lại GitHub Environments** `staging` + `production` (và Required reviewers cho
+  `production`) trong repo mới — đây là **cấu hình trên GitHub, không nằm trong code**. Xem
+  mục [Thiết lập trên GitHub](#thiết-lập-trên-github-bắt-buộc-cho-phần-deploy).
+
+### Mỗi project mới cần đổi
+
+- Thay thư mục **`src/`** bằng app thật (giữ nguyên tên các npm script, hoặc sửa `Dockerfile`
+  nếu output khác `dist/server.js`).
+- Sửa **`.github/CODEOWNERS`** (đang là placeholder `@your-org/your-team`).
+- `IMAGE_NAME` **không cần đổi** — tự lấy theo `github.repository` (đã tự hạ chữ thường cho
+  hợp lệ với GHCR).
+
+### Tái dùng phần CI mà không copy
+
+Repo khác có thể gọi từ xa reusable workflow, sửa 1 lần ở đây là mọi repo con hưởng theo:
+
+```yaml
+jobs:
+  ci:
+    uses: <owner>/CI-CD/.github/workflows/reusable-node-ci.yml@main
+```
+
+(Nhưng `ci.yml` / `cd.yml` vẫn phải nằm ở mỗi repo.)
