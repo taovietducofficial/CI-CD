@@ -4,7 +4,7 @@
   "description": "Bigtech-grade CI/CD template: Node.js/TypeScript + GitHub Actions + Docker",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "main": "dist/server.js",
   "scripts": {
