@@ -68,13 +68,24 @@ jobs:
           sbom: true # supply-chain: attach SBOM attestation
           provenance: mode=max # supply-chain: SLSA provenance
 
+      # Base-OS CVEs are REPORTED to the Security tab and tracked via Dependabot
+      # (docker ecosystem) — they don't hard-block releases, because base images
+      # routinely carry HIGH advisories with no same-day app-side fix. CVEs we DO
+      # control (app + deps) are hard-gated in ci.yml's `trivy-fs` job.
       - name: Scan image for CVEs
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: trivy-results.sarif
           severity: HIGH,CRITICAL
-          exit-code: '1'
           ignore-unfixed: true
+
+      - name: Upload scan results to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
