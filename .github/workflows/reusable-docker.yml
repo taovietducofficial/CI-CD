@@ -98,12 +98,19 @@ jobs:
       # flaky, do NOT downgrade this to continue-on-error -- a smoke test that cannot fail
       # is the bug it exists to prevent. Upgrade path: build on a native `ubuntu-24.04-arm`
       # runner (free for public repos) via a matrix, and drop QEMU entirely.
+      #
+      # The `docker image rm` is load-bearing: with the classic overlay2 image store a
+      # digest can hold exactly one platform variant, so pulling the arm64 variant of a
+      # digest already present as amd64 fails with `cannot overwrite digest`. Docker
+      # Desktop's containerd store holds both and hides this, so it does not reproduce
+      # locally. Drop the image between platforms.
       - name: Smoke test image on every published platform
         env:
           IMAGE: ${{ steps.image.outputs.ref }}
         run: |
           for platform in linux/amd64 linux/arm64; do
             echo "::group::smoke $platform"
+            docker image rm -f "$IMAGE" >/dev/null 2>&1 || true
             docker run -d --name smoke --platform "$platform" -p 3000:3000 "$IMAGE"
             echo "arch inside container: $(docker exec smoke uname -m)"
             for _ in $(seq 60); do
