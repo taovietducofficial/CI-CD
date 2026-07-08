@@ -148,8 +148,22 @@ jobs:
 
 (Nhưng `ci.yml` / `cd.yml` vẫn phải nằm ở mỗi repo.)
 
+## Giấy phép & ghi công
+
+[Apache-2.0](LICENSE) — Copyright 2026 Tào Việt Đức.
+
+Bạn được tự do dùng, sửa, và dùng trong sản phẩm thương mại. Ba nghĩa vụ:
+
+- Giữ nguyên các thông báo copyright, patent, trademark, attribution trong source (§4c).
+- Bản phái sinh bạn phân phối **phải mang theo nội dung** của [NOTICE](NOTICE) (§4d).
+- Ghi rõ những file bạn đã sửa (§4b).
+- Không được dùng tên tác giả để quảng bá bản fork của bạn (§6).
+
+Image publish từ repo này được cosign ký và có SLSA provenance trỏ về repo gốc. Fork rồi
+build lại thì provenance ghi repo của bạn — đó là cách đúng. Phát tán lại image của repo
+này thì chữ ký chứng minh nguồn gốc, và không xoá được.
+
 ## Thêm
 
 - Quy trình đóng góp & chuẩn commit: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Chính sách bảo mật & supply-chain: [SECURITY.md](SECURITY.md)
-- Giấy phép: [MIT](LICENSE)
