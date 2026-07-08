@@ -32,6 +32,7 @@
           { "context": "CodeQL" },
           { "context": "Dependency review" },
           { "context": "Trivy filesystem scan" },
+          { "context": "Zizmor" },
           { "context": "Lint PR title" }
         ]
       }

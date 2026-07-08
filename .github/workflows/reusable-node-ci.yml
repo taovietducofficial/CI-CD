@@ -19,6 +19,8 @@ jobs:
         node: ${{ fromJSON(inputs.node-versions) }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -41,4 +43,4 @@ jobs:
 
       - name: Report coverage on PR
         if: matrix.node == '22' && github.event_name == 'pull_request'
-        uses: davelosert/vitest-coverage-report-action@v2
+        uses: davelosert/vitest-coverage-report-action@3c054a2d2e2ca45446417ad5d6d5eb33092af8f1 # v2.12.1
