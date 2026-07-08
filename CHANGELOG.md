@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/taovietducofficial/CI-CD/compare/v1.1.0...v1.1.1) (2026-07-08)
+
+
+### Documentation
+
+* document the pipeline and drop the self-certified secret checkbox ([fbc5c29](https://github.com/taovietducofficial/CI-CD/commit/fbc5c29004f0082b054753a0363abe5c5b8b49aa))
+
 ## [1.1.0](https://github.com/taovietducofficial/CI-CD/compare/v1.0.2...v1.1.0) (2026-07-07)
 
 
