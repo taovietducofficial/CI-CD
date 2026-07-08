@@ -97,6 +97,24 @@ jobs:
       - id: epoch
         run: echo "value=$(git log -1 --pretty=%ct)" >>"$GITHUB_OUTPUT"
 
+      # docker/metadata-action stamps org.opencontainers.image.created with now(), to the
+      # millisecond, and ignores SOURCE_DATE_EPOCH. That label lives in the image config,
+      # so a rebuild can never reproduce it. Take the published labels as given: what this
+      # job verifies is that the *source* rebuilds to the same layers and the same config,
+      # not that CI can guess its own run metadata. Everything else in the config -- env,
+      # cmd, user, entrypoint, rootfs -- is still compared.
+      - name: Read labels off the published image
+        id: labels
+        env:
+          IMAGE: ${{ needs.build-push.outputs.image }}
+        run: |
+          {
+            echo 'value<<LABELS_EOF'
+            docker buildx imagetools inspect "$IMAGE" --format '{{json .Image}}' \
+              | jq -r '((.["linux/amd64"] // .).config.Labels // {}) | to_entries[] | "\(.key)=\(.value)"'
+            echo 'LABELS_EOF'
+          } >>"$GITHUB_OUTPUT"
+
       # No cache-from. A cached rebuild only proves the cache works; an independent
       # rebuild on a clean VM is the only thing that proves reproducibility. Attestations
       # are off because they are what makes the index digest unstable -- we compare the
@@ -118,6 +136,7 @@ jobs:
           no-cache: true
           provenance: false
           sbom: false
+          labels: ${{ steps.labels.outputs.value }}
           outputs: type=image,oci-mediatypes=true,rewrite-timestamp=true
 
       - name: Compare against the published amd64 manifest
