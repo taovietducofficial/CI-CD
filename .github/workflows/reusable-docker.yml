@@ -67,14 +67,16 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           sbom: true
           provenance: mode=max
-          outputs: type=image,rewrite-timestamp=true # rewrite-timestamp needs buildkit >= 0.13
+          # NOT `push: true` -- that is shorthand for `--output=type=registry`, and adding a
+          # second image exporter here would make buildx reject the build. push=true on the
+          # single exporter does the same thing. rewrite-timestamp needs buildkit >= 0.13.
+          outputs: type=image,push=true,rewrite-timestamp=true
 
       - name: Compute image refs (lowercase)
         id: image

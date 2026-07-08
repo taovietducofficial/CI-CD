@@ -101,6 +101,12 @@ jobs:
       # rebuild on a clean VM is the only thing that proves reproducibility. Attestations
       # are off because they are what makes the index digest unstable -- we compare the
       # per-platform image manifest, which attestations do not touch.
+      #
+      # oci-mediatypes=true is load-bearing. The published image is part of an OCI index
+      # (multi-platform + attestations force OCI), but a single-platform build with no
+      # attestations defaults to Docker schema 2. Without this the manifest digests differ
+      # on mediaType alone -- identical config, identical layers -- and this job fails
+      # every single run while the build is in fact perfectly reproducible.
       - name: Rebuild amd64 from scratch
         id: rebuild
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
@@ -109,10 +115,10 @@ jobs:
         with:
           context: .
           platforms: linux/amd64
-          push: false
+          no-cache: true
           provenance: false
           sbom: false
-          outputs: type=image,rewrite-timestamp=true
+          outputs: type=image,oci-mediatypes=true,rewrite-timestamp=true
 
       - name: Compare against the published amd64 manifest
         env:
