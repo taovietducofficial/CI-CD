@@ -40,15 +40,36 @@ curl localhost:3000/health
 ## Pipeline
 
 - **`ci.yml`** — trên PR & push nhánh non-main: quality gate (matrix Node 22/24) + lint tiêu
-  đề PR + CodeQL + dependency review + Trivy fs scan + comment coverage lên PR.
-- **`cd.yml`** — trên push `main` và tag `v*`: quality gate -> build **multi-arch** (amd64 +
-  arm64, buildx cache, SBOM, provenance) -> push GHCR -> GitHub attestation -> Trivy image scan
-  (advisory) -> cosign sign -> **verify chữ ký** -> deploy staging (auto) -> deploy production
-  (chờ approval).
-- **`release.yml`** — release-please: gộp các commit `feat:`/`fix:` thành một Release PR; merge
-  PR đó thì tự tạo tag `vX.Y.Z` + CHANGELOG + GitHub Release, và tag đó kích hoạt `cd.yml` build
-  image gắn version semver.
+  đề PR + CodeQL + dependency review + Trivy fs scan + **zizmor** (lint chính workflow) +
+  comment coverage lên PR.
+- **`cd.yml`** — trên push `main`: release-please -> quality gate -> `reusable-docker.yml` ->
+  verify-reproducible -> deploy staging (auto) -> deploy production (chờ approval).
+  **Một workflow duy nhất build image.** Trước đây release-please nằm ở file riêng và cũng
+  build; vì commit release-please rơi vào `main`, cả hai file cùng chạy trên một commit và
+  tạo **hai digest khác nhau** — một cái được deploy, cái kia nhận tag `vX.Y.Z` + `latest`,
+  ai xong sau thì thắng. Gộp lại thì tag, chữ ký, và thứ được deploy luôn là cùng một digest.
+  Trigger `tags: ['v*']` chỉ dành cho tag đẩy tay.
 - **`reusable-node-ci.yml`** — quality gate dùng chung (`workflow_call`).
+- **`reusable-docker.yml`** — toàn bộ phần supply-chain: build **multi-arch** (amd64 + arm64,
+  buildx cache, SBOM, provenance `mode=max`, `SOURCE_DATE_EPOCH`) -> push GHCR -> **smoke test
+  trên cả hai kiến trúc** -> GitHub attestation -> Trivy image scan (advisory, đẩy lên tab
+  Security) -> cosign sign. Image không boot được thì job fail **trước khi ký**, nên cổng
+  deploy từ chối nó. Cổng tự đóng, không cần logic thêm.
+- **`scripts/verify-image.sh`** — cổng deploy, một bản dùng chung cho staging lẫn production
+  (hai bản sao của một cổng bảo mật sẽ trôi xa nhau). Kiểm ba thứ: chữ ký đến từ đúng workflow
+  **tại đúng ref**, provenance trỏ về đúng repo này, và SBOM có tồn tại.
+
+### Reproducible build để làm gì
+
+`SOURCE_DATE_EPOCH` + `rewrite-timestamp` khiến layer bit-for-bit giống nhau giữa các lần
+build. Nó **không** làm digest của image index ổn định — SLSA provenance nhúng
+`buildStartedOn` / `buildInvocationId`, đổi mỗi lần chạy. Digest ổn định chỉ có nếu tắt
+`provenance` và `sbom`, tức phá hủy toàn bộ mục đích của repo này.
+
+Lợi ích thật là **verifiable rebuild**: job `verify-reproducible` clone lại source, build lại
+amd64 **không dùng cache**, rồi so digest của per-platform manifest với cái đã publish. Khớp
+⇒ image trên registry đúng là thứ sinh ra từ source này, không có gì được chèn vào. Đó là lý
+do job này tồn tại — reproducible build mà không ai kiểm chứng thì chỉ là một dòng config.
 
 ## Thiết lập trên GitHub (bắt buộc cho phần deploy)
 
@@ -64,17 +85,26 @@ curl localhost:3000/health
 5. **Release tự động** — bật **Settings -> General -> Pull Requests -> Allow squash merging**
    và đặt commit message của squash theo tiêu đề PR. release-please đọc các commit theo chuẩn
    Conventional Commits (`feat:`, `fix:`...) để quyết định version.
-6. **Deploy thật** — thay bước `echo` placeholder trong `cd.yml` bằng lệnh thật (`kubectl` /
+6. **Secret scanning** — Settings -> Code security, bật **Secret scanning** + **Push protection**.
+   Miễn phí với repo **public**; repo private cần GitHub Advanced Security. Không có nó thì thêm
+   một job `gitleaks` vào `ci.yml` — nhưng nó chỉ báo _sau khi_ secret đã vào history, còn push
+   protection chặn ngay lúc `git push`. Đừng thêm cả hai.
+7. **Deploy thật** — thay bước `echo` placeholder trong `cd.yml` bằng lệnh thật (`kubectl` /
    `helm` / `ssh`) và thêm secret (vd `KUBE_CONFIG`) vào từng environment.
 
-## Verify chữ ký image
+## Verify image
+
+Chạy đúng thứ cổng deploy chạy:
 
 ```bash
-cosign verify \
-  --certificate-identity-regexp "https://github.com/<owner>/ci-cd/.github/workflows/cd.yml@.*" \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/<owner>/ci-cd@<digest>
+GITHUB_REPOSITORY=<owner>/ci-cd GH_TOKEN=$(gh auth token) \
+  bash scripts/verify-image.sh ghcr.io/<owner>/ci-cd@<digest>
 ```
+
+Identity là **`reusable-docker.yml`** (nơi `cosign sign` chạy), không phải workflow gọi nó. Và
+nó bị ghim vào `refs/heads/main` hoặc `refs/tags/v*` — nếu chỉ ghim tên file mà để ref tự do
+(`@.+$`), bất kỳ ai có quyền write cũng đẩy được một nhánh có workflow gọi
+`reusable-docker.yml`, mint chữ ký hợp lệ, và đi thẳng qua cổng production.
 
 ## Dùng cho project mới
 
@@ -100,7 +130,9 @@ Repo này được thiết kế để tái dùng. Cách nhanh nhất là dùng n
 
 - Thay thư mục **`src/`** bằng app thật (giữ nguyên tên các npm script, hoặc sửa `Dockerfile`
   nếu output khác `dist/server.js`).
-- Sửa **`.github/CODEOWNERS`** (đang là placeholder `@your-org/your-team`).
+- Sửa **`.github/CODEOWNERS`** — đang trỏ về owner của repo này, đổi sang team của bạn.
+- Ruleset để `required_approving_review_count: 0` cho repo solo. Có team thì **tăng lên `1`** và
+  bật `require_code_owner_review`, nếu không cổng PR chỉ enforce _CI xanh_, không enforce _review_.
 - `IMAGE_NAME` **không cần đổi** — tự lấy theo `github.repository` (đã tự hạ chữ thường cho
   hợp lệ với GHCR).
 

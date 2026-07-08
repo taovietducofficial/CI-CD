@@ -23,14 +23,25 @@ jobs:
     outputs:
       image: ${{ steps.image.outputs.ref }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
 
-      - uses: docker/setup-qemu-action@v3
+      # Pins every timestamp buildkit controls to the commit date, so the same commit
+      # produces bit-for-bit identical layers. This does NOT stabilise the index digest:
+      # the SLSA provenance attestation embeds buildStartedOn/buildInvocationId, which
+      # change every run. The payoff is verifiable rebuild -- see the verify-reproducible
+      # job in cd.yml, which is the only thing that proves this actually works.
+      - name: Derive SOURCE_DATE_EPOCH from the commit
+        id: epoch
+        run: echo "value=$(git log -1 --pretty=%ct)" >>"$GITHUB_OUTPUT"
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -38,7 +49,7 @@ jobs:
 
       - name: Extract metadata (tags, labels)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -50,41 +61,93 @@ jobs:
 
       - name: Build and push
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        env:
+          SOURCE_DATE_EPOCH: ${{ steps.epoch.outputs.value }}
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           sbom: true
           provenance: mode=max
+          # NOT `push: true` -- that is shorthand for `--output=type=registry`, and adding a
+          # second image exporter here would make buildx reject the build. push=true on the
+          # single exporter does the same thing. rewrite-timestamp needs buildkit >= 0.13.
+          outputs: type=image,push=true,rewrite-timestamp=true
 
       - name: Compute image refs (lowercase)
         id: image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           echo "name=${REGISTRY}/${IMAGE_NAME,,}" >>"$GITHUB_OUTPUT"
-          echo "ref=${REGISTRY}/${IMAGE_NAME,,}@${{ steps.build.outputs.digest }}" >>"$GITHUB_OUTPUT"
+          echo "ref=${REGISTRY}/${IMAGE_NAME,,}@${DIGEST}" >>"$GITHUB_OUTPUT"
+
+      # Runs before attest+sign on purpose: the image is already pushed and cannot be
+      # recalled, but an image that fails to boot never gets a signature -- and the
+      # cosign verify gate in cd.yml refuses to deploy an unsigned digest.
+      #
+      # Both platforms, because we publish both. arm64 runs under the QEMU installed
+      # above; a plain `docker run` would silently pick the amd64 variant on this runner
+      # and leave the arm64 image we sign completely unexercised.
+      #
+      # ponytail: Node under qemu-user is slow and occasionally unstable. If arm64 turns
+      # flaky, do NOT downgrade this to continue-on-error -- a smoke test that cannot fail
+      # is the bug it exists to prevent. Upgrade path: build on a native `ubuntu-24.04-arm`
+      # runner (free for public repos) via a matrix, and drop QEMU entirely.
+      - name: Smoke test image on every published platform
+        env:
+          IMAGE: ${{ steps.image.outputs.ref }}
+        run: |
+          for platform in linux/amd64 linux/arm64; do
+            echo "::group::smoke $platform"
+            docker run -d --name smoke --platform "$platform" -p 3000:3000 "$IMAGE"
+            echo "arch inside container: $(docker exec smoke uname -m)"
+            for _ in $(seq 60); do
+              if curl -fsS localhost:3000/health >/dev/null; then break; fi
+              sleep 1
+            done
+            curl -fsS localhost:3000/health | grep -q '"status":"ok"' || { docker logs smoke; exit 1; }
+            docker rm -f smoke
+            echo "::endgroup::"
+          done
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
           subject-name: ${{ steps.image.outputs.name }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
+      # Advisory, not blocking: the image is already pushed by this point, so failing
+      # here would not recall it. The value is visibility -- findings land in the
+      # Security tab, where a human and Dependabot can see them.
       - name: Scan image for CVEs (advisory)
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         continue-on-error: true
         with:
           image-ref: ${{ steps.image.outputs.ref }}
           severity: HIGH,CRITICAL
           ignore-unfixed: true
+          format: sarif
+          output: trivy-image.sarif
+
+      - name: Upload image scan results
+        if: always() && hashFiles('trivy-image.sarif') != ''
+        uses: github/codeql-action/upload-sarif@02c5e83432fe5497fd85b873b6c9f16a8578e1d9 # v3.37.0
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
 
+      # Interpolating ${{ }} straight into run: is a template-injection sink. Values go
+      # through env, always -- zizmor (ci.yml) enforces this.
       - name: Sign image (keyless, by digest)
-        run: cosign sign --yes ${{ steps.image.outputs.ref }}
+        env:
+          IMAGE: ${{ steps.image.outputs.ref }}
+        run: cosign sign --yes "$IMAGE"
