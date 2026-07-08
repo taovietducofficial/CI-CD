@@ -1,8 +1,16 @@
 name: CD
 
+# One workflow owns main. Release-please used to live in its own file that also built an
+# image; because a release-please merge lands on main, both workflows fired on the same
+# commit and produced two independent builds. Builds are not bit-identical at the index
+# level (provenance embeds buildStartedOn), so the two runs published two different
+# digests -- one got deployed, the other got the `vX.Y.Z` and `latest` tags, and which
+# was which depended on who finished last. Merged, there is exactly one build per commit.
 on:
   push:
     branches: [main]
+    # Manual tag pushes only. Tags created by release-please use GITHUB_TOKEN, and
+    # token-created events never trigger workflows.
     tags: ['v*']
   workflow_dispatch:
 
@@ -18,19 +26,107 @@ permissions:
   contents: read
 
 jobs:
+  release-please:
+    name: Release please
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      version: ${{ steps.rp.outputs.version }}
+    steps:
+      - id: rp
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
   quality:
     name: Quality gate
     uses: ./.github/workflows/reusable-node-ci.yml
 
   build-push:
     name: Build, scan, sign & push
-    needs: quality
+    needs: [quality, release-please]
+    # release-please is skipped on tag pushes and workflow_dispatch. A skipped dependency
+    # skips its dependents by default, so spell the condition out.
+    if: >-
+      ${{ !cancelled()
+          && needs.quality.result == 'success'
+          && (needs.release-please.result == 'success' || needs.release-please.result == 'skipped') }}
     permissions:
       contents: read
       packages: write
       id-token: write
       attestations: write
+      security-events: write # reusable-docker.yml uploads the Trivy SARIF
     uses: ./.github/workflows/reusable-docker.yml
+    with:
+      # Empty unless this commit is the release-please release commit; the metadata step
+      # in reusable-docker.yml disables the semver tag when it is empty. This is what ties
+      # `vX.Y.Z` to the exact digest that gets deployed below.
+      version: ${{ needs.release-please.outputs.version }}
+
+  # Proves the build is reproducible. Deliberately does NOT gate deploy: a reproducibility
+  # regression means we lost a verification property, not that the image is unsafe.
+  verify-reproducible:
+    name: Verify reproducible build
+    needs: build-push
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: epoch
+        run: echo "value=$(git log -1 --pretty=%ct)" >>"$GITHUB_OUTPUT"
+
+      # No cache-from. A cached rebuild only proves the cache works; an independent
+      # rebuild on a clean VM is the only thing that proves reproducibility. Attestations
+      # are off because they are what makes the index digest unstable -- we compare the
+      # per-platform image manifest, which attestations do not touch.
+      - name: Rebuild amd64 from scratch
+        id: rebuild
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        env:
+          SOURCE_DATE_EPOCH: ${{ steps.epoch.outputs.value }}
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          provenance: false
+          sbom: false
+          outputs: type=image,rewrite-timestamp=true
+
+      - name: Compare against the published amd64 manifest
+        env:
+          IMAGE: ${{ needs.build-push.outputs.image }}
+          REBUILT: ${{ steps.rebuild.outputs.digest }}
+        run: |
+          published=$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest}}' \
+            | jq -r '.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest')
+          echo "published amd64 manifest: $published"
+          echo "independent rebuild:      $REBUILT"
+          if [ "$published" != "$REBUILT" ]; then
+            echo "::error::Build is not reproducible: the published image cannot be recreated from source."
+            exit 1
+          fi
 
   deploy-staging:
     name: Deploy to staging
@@ -42,24 +138,27 @@ jobs:
       contents: read
       packages: read
       id-token: write
+      attestations: read
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: sigstore/cosign-installer@v3
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
 
-      - name: Verify signature before deploy
+      # One script, not two copies. The staging and production gates must never drift.
+      - name: Verify signature, provenance and SBOM
         env:
           IMAGE: ${{ needs.build-push.outputs.image }}
-        run: |
-          cosign verify \
-            --certificate-identity-regexp "^${{ github.server_url }}/${{ github.repository }}/.github/workflows/.+@.+$" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            "$IMAGE"
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/verify-image.sh "$IMAGE"
 
       - name: Deploy
         env:
@@ -76,24 +175,27 @@ jobs:
       contents: read
       packages: read
       id-token: write
+      attestations: read
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: sigstore/cosign-installer@v3
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
 
-      - name: Verify signature before deploy
+      # One script, not two copies. The staging and production gates must never drift.
+      - name: Verify signature, provenance and SBOM
         env:
           IMAGE: ${{ needs.build-push.outputs.image }}
-        run: |
-          cosign verify \
-            --certificate-identity-regexp "^${{ github.server_url }}/${{ github.repository }}/.github/workflows/.+@.+$" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            "$IMAGE"
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/verify-image.sh "$IMAGE"
 
       - name: Deploy
         env:
