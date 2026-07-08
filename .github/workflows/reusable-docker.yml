@@ -23,7 +23,7 @@ jobs:
     outputs:
       image: ${{ steps.image.outputs.ref }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
 
@@ -80,9 +80,11 @@ jobs:
 
       - name: Compute image refs (lowercase)
         id: image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           echo "name=${REGISTRY}/${IMAGE_NAME,,}" >>"$GITHUB_OUTPUT"
-          echo "ref=${REGISTRY}/${IMAGE_NAME,,}@${{ steps.build.outputs.digest }}" >>"$GITHUB_OUTPUT"
+          echo "ref=${REGISTRY}/${IMAGE_NAME,,}@${DIGEST}" >>"$GITHUB_OUTPUT"
 
       # Runs before attest+sign on purpose: the image is already pushed and cannot be
       # recalled, but an image that fails to boot never gets a signature -- and the
@@ -114,7 +116,7 @@ jobs:
           done
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
           subject-name: ${{ steps.image.outputs.name }}
           subject-digest: ${{ steps.build.outputs.digest }}
@@ -135,7 +137,7 @@ jobs:
 
       - name: Upload image scan results
         if: always() && hashFiles('trivy-image.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@02c5e83432fe5497fd85b873b6c9f16a8578e1d9 # v3.37.0
         with:
           sarif_file: trivy-image.sarif
           category: trivy-image
