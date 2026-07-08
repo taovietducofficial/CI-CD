@@ -58,6 +58,12 @@ jobs:
             type=semver,pattern={{version}}
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+          # licenses/source/revision come from the repo automatically. authors and vendor
+          # do not -- and they travel inside the signed, attested image config, where a
+          # fork cannot quietly strip them from an artifact you already published.
+          labels: |
+            org.opencontainers.image.authors=Tào Việt Đức (https://github.com/taovietducofficial)
+            org.opencontainers.image.vendor=Tào Việt Đức
 
       - name: Build and push
         id: build

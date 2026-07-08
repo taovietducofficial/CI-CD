@@ -3,8 +3,8 @@
   "version": "1.1.0",
   "description": "Production CI/CD template: Node.js/TypeScript + GitHub Actions + Docker",
   "type": "module",
-  "license": "MIT",
-  "author": "taovietducofficial",
+  "license": "Apache-2.0",
+  "author": "Tào Việt Đức <taovietduc.work@gmail.com> (https://github.com/taovietducofficial)",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/taovietducofficial/CI-CD.git"
