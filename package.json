@@ -39,14 +39,14 @@
     "fastify": "^5.2.0"
   },
   "devDependencies": {
-    "@eslint/js": "^9.17.0",
-    "@types/node": "^22.10.0",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.1.1",
     "@vitest/coverage-v8": "^4.1.10",
-    "eslint": "^9.17.0",
-    "prettier": "^3.4.2",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
-    "typescript-eslint": "^8.18.0",
+    "eslint": "^10.7.0",
+    "prettier": "^3.9.5",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "typescript-eslint": "^8.64.0",
     "vitest": "^4.1.10"
   }
 }
